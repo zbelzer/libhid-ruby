@@ -4,7 +4,7 @@ require 'ffi'
 module LibHID
   module Native
     extend FFI::Library
-    ffi_lib "/usr/lib/libhid.so"
+    ffi_lib "libhid"
 
     # typedef struct HIDInterface_t {
     #   struct usb_dev_handle *dev_handle;
