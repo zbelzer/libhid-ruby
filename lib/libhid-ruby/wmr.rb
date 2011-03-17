@@ -1,0 +1,4 @@
+module WMR
+  WMR100_VENDOR_ID = 0x0fde
+  WMR100_PRODUCT_ID = 0xca01
+end
