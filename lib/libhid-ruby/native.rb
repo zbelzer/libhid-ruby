@@ -269,5 +269,26 @@ module LibHID
     attach_function :hid_close, [:pointer], :hid_return
     attach_function :hid_delete_HIDInterface, [:pointer], :void
     attach_function :hid_cleanup, [], :hid_return
+
+    #TOOD: Are these actually useful?
+    #This will take something like 0xff000001 (which is a bignum in ruby),
+    #and write it out to an integer pointer correctly
+    def self.write_bignum32(pointer, uint)
+      pointer.write_array_of_ushort bignum32_to_little_endian_short_array(uint)
+    end
+
+    #TODO: This isn't quite working, are there extra bits on bottom in the converter?
+    def self.write_bignum32_array(pointer, uints)
+      array = uints.map { |uint| bignum32_to_little_endian_short_array(uint) }.flatten
+      pointer.write_array_of_ushort array
+    end
+
+    private
+
+    def self.bignum32_to_little_endian_short_array(uint)
+      top = (uint >> 16) & 0xffff
+      bottom = uint & 0x0000ffff
+      [bottom, top]
+    end
   end
 end
