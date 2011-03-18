@@ -54,7 +54,7 @@ module LibHID
     # } HIDInterface;
     # #  
     class HIDInterface < FFI::Struct
-      attr_accessor :length, :remaining, :position
+      attr_writer :buffer, :remaining, :position
 
       def buffer
         @buffer ||= FFI::Buffer.new :char, BUF_SIZE
@@ -80,28 +80,28 @@ module LibHID
       def read_packet
         # puts "Reading packet"
         Native.hid_interrupt_read(self.to_ptr, USB_ENDPOINT_IN + 1, buffer, RECV_PACKET_LEN, 0)
-        data =  buffer.get_bytes(0, RECV_PACKET_LEN)
+
+        data = buffer.get_bytes(0, RECV_PACKET_LEN)
         data_array = (0..Native::RECV_PACKET_LEN).map {|x| data[x] if data[x]}
-        # puts (0..Native::RECV_PACKET_LEN).map {|x| data[x].to_s(16).rjust(2, '0') if data[x]}.join(' ')
+        puts (0..Native::RECV_PACKET_LEN).map {|x| data[x].to_s(16).rjust(2, '0') if data[x]}.join(' ')
 
         len = buffer.get_bytes(0, 1)[0].to_i
         # puts "Length is #{len.to_s(16)}" unless len.nil?
 
-        @length = [len, 7].max
-        @remaining = @length
-        @position = 0
+        length = [len, 7].max
+        @position = 1
+        @remaining = length
       end
 
       def read_byte
         # puts "Reading byte at position #{@position}"
-        while remaining.zero?
-          read_packet
-        end
+        read_packet while remaining.zero? 
 
         byte = buffer.get_bytes(position, 1)[0].to_i
-        # puts "Read byte #{byte.to_s(16)}" unless byte.nil?
         @position += 1
         @remaining -= 1
+
+        # puts "Read byte #{byte.to_s(16)}, position #{position}, remaining #{remaining}" unless byte.nil?
 
         byte
       end
@@ -120,7 +120,7 @@ module LibHID
 
       def read_data
         byte = read_byte
-        while byte != 0xff  do
+        while byte != 0xff do
           byte = read_byte
         end
 
@@ -137,11 +137,11 @@ module LibHID
 
         case(type)
         when 0x41
-          puts "Rain #{data.inspect}"
-          fetch_data(unk1, type, 17)
+          data = fetch_data(unk1, type, 17)
+          puts "Rain: #{data.inspect}"
         when 0x42
           data = fetch_data(unk1, type, 12)
-          puts "Temp #{data.inspect}"
+          puts "Temp: #{print_data(data)}"
 
           temp = (data[3] + ((data[4] & 0x0f) << 8)) / 10.0;
           temp = ((data[4] >> 4) == 0x8) ? -temp : temp
@@ -149,19 +149,27 @@ module LibHID
 
         when 0x44
           data = fetch_data(unk1, type, 7)
-          puts "Water #{data.inspect}"
+          puts "Water: #{data.inspect}"
         when 0x46
           data = fetch_data(unk1, type, 8)
-          puts "Pressure #{data.inspect}"
+          puts "Pressure: #{data.inspect}"
         when 0x47
           data = fetch_data(unk1, type, 5)
-          puts "UV #{data.inspect}"
+          puts "UV: #{data.inspect}"
         when 0x48
           data = fetch_data(unk1, type, 11)
-          puts "Wind #{data.inspect}"
+          puts "Wind: #{data.inspect}"
         when 0x60
           data = fetch_data(unk1, type, 12)
-          puts "Clock #{data.inspect}"
+          puts "Clock: #{print_data(data)}"
+
+          mi = data[4];
+          hr = data[5];
+          dy = data[6];
+          mo = data[7];
+          yr = data[8] + 2000;
+
+          printf("%02d/%02d/%04d %02d:%02d\n", mo, dy, yr, hr, mi)
         else
           printf("Unknown packet type: %02x, skipping\n", type)
         end
@@ -171,7 +179,10 @@ module LibHID
         #  end
 
         LibHID::Native.send_ready_packet(self)
+      end
 
+      def print_data(data)
+        data.map {|d| d.to_s(16).rjust(2, '0') if d}.join(' ')
       end
 
       def self.release(ptr)
