@@ -108,8 +108,23 @@ module LibHID
     # # hid_set_usb_debug(0);
     # attach_function :hid_set_usb_debug, [:int], :void
     
+    RECV_PACKET_LEN   = 8
+    BUF_SIZE = 255
+    PATHLEN = 2
+    PATH_IN  = [ 0xff000001, 0xff000001 ]
+    PATH_OUT = [ 0xff000001, 0xff000002 ]
+    INIT_PACKET1 = [ 0x20, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
+    INIT_PACKET2 = [ 0x01, 0xd0, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
+
+
     attach_function :hid_init, [], :hid_return
     attach_function :hid_new_HIDInterface, [], :pointer
     attach_function :hid_force_open, [:pointer, :int, :pointer, :int], :hid_return
+    attach_function :hid_write_identification, [:pointer, :pointer], :hid_return
+    attach_function :hid_set_output_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+
+    attach_function :hid_close, [:pointer], :hid_return
+    attach_function :hid_delete_HIDInterface, [:pointer], :void
+    attach_function :hid_cleanup, [], :hid_return
   end
 end
