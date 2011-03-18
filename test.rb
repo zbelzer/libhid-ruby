@@ -1,16 +1,6 @@
 require File.expand_path('../lib/libhid-ruby', __FILE__)
 
 module LibHID
-  RETRIES = 10
-
-  def self.check_result(operation, result)
-    if result == :hid_ret_success
-      puts "#{operation}... success"
-    else
-      raise "#{operation} failed with #{result}"
-    end
-  end
-
   begin
     check_result "Initilizing device", Native.hid_init
 
@@ -23,18 +13,20 @@ module LibHID
     matcher[:vendor_id] = WMR::WMR100_VENDOR_ID
     matcher[:product_id] = WMR::WMR100_PRODUCT_ID
 
-    check_result "Opening device", Native.hid_force_open(interface_ptr, 0, matcher_ptr, RETRIES)
+    check_result "Opening device", Native.hid_force_open(interface_ptr, 0, matcher_ptr, Native::RETRIES)
 
-    path_in = FFI::Buffer.new :ulong, 2
-    path_in.write_array_of_ulong Native::PATH_IN
+    Native.send_init_packet(interface)
+    Native.send_ready_packet(interface)
 
-    init_packet_1 = FFI::MemoryPointer.new(Native::INIT_PACKET1.size * 1).write_array_of_char(Native::INIT_PACKET1)
-    init_packet_2 = FFI::MemoryPointer.new(Native::INIT_PACKET2.size * 1).write_array_of_char(Native::INIT_PACKET2)
+    puts "Found on USB: #{interface[:id]}"
 
-    check_result "Sending init packet", Native.hid_set_output_report(interface_ptr, path_in, 2, init_packet_1, init_packet_1.size)
-    check_result "Sending ready packet", Native.hid_set_output_report(interface_ptr, path_in, 2, init_packet_2, init_packet_2.size)
+    loop do
+      interface.read_data
+    end
+
   rescue => e
     puts e.message
+    puts e.backtrace.join("\n")
   ensure
     puts "Cleaning up"
     Native.hid_close(interface) unless interface_ptr.null?

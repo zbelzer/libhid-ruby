@@ -2,9 +2,47 @@ require 'rubygems'
 require 'ffi'
 
 module LibHID
+  def self.check_result(operation, result)
+    if result == :hid_ret_success
+      puts "#{operation}... success"
+    else
+      raise "#{operation} failed with #{result}"
+    end
+  end
+
   module Native
     extend FFI::Library
     ffi_lib "libhid"
+
+    RECV_PACKET_LEN   = 8
+    BUF_SIZE = 255
+    PATHLEN = 2
+    PATH_IN  = [ 0xff00, 0x0001, 0xff00, 0x0001 ]
+    PATH_OUT = [ 0xff00, 0x0001, 0xff00, 0x0002 ]
+    INIT_PACKET1 = [ 0x20, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
+    INIT_PACKET2 = [ 0x01, 0xd0, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
+    USB_ENDPOINT_IN	= 0x80
+    USB_ENDPOINT_OUT = 0x00
+
+    RETRIES = 10
+
+    def self.send_init_packet(interface)
+      path_in = FFI::Buffer.new :ushort, 4
+      path_in.write_array_of_ushort PATH_IN
+
+      init_packet = FFI::MemoryPointer.new(INIT_PACKET1.size * 1).write_array_of_char(INIT_PACKET1)
+      result = Native.hid_set_output_report(interface.to_ptr, path_in, 2, init_packet, init_packet.size)
+      # LibHID.check_result "Sending init packet", result
+    end
+
+    def self.send_ready_packet(interface)
+      path_in = FFI::Buffer.new :ushort, 4
+      path_in.write_array_of_ushort PATH_IN
+
+      ready_packet = FFI::MemoryPointer.new(INIT_PACKET2.size * 1).write_array_of_char(INIT_PACKET2)
+      result = Native.hid_set_output_report(interface.to_ptr, path_in, 2, ready_packet, ready_packet.size)
+      # LibHID.check_result "Sending init packet", result
+    end
 
     # typedef struct HIDInterface_t {
     #   struct usb_dev_handle *dev_handle;
@@ -16,6 +54,20 @@ module LibHID
     # } HIDInterface;
     # #  
     class HIDInterface < FFI::Struct
+      attr_accessor :length, :remaining, :position
+
+      def buffer
+        @buffer ||= FFI::Buffer.new :char, BUF_SIZE
+      end
+
+      def remaining
+        @remaining ||= 0
+      end
+
+      def position
+        @position ||= 0
+      end
+
       layout(
         :usb_dev_handle, :pointer,
         :usb_device, :pointer,
@@ -24,6 +76,103 @@ module LibHID
         :hid_data, :pointer,
         :hid_parser, :pointer
       )
+
+      def read_packet
+        # puts "Reading packet"
+        Native.hid_interrupt_read(self.to_ptr, USB_ENDPOINT_IN + 1, buffer, RECV_PACKET_LEN, 0)
+        data =  buffer.get_bytes(0, RECV_PACKET_LEN)
+        data_array = (0..Native::RECV_PACKET_LEN).map {|x| data[x] if data[x]}
+        # puts (0..Native::RECV_PACKET_LEN).map {|x| data[x].to_s(16).rjust(2, '0') if data[x]}.join(' ')
+
+        len = buffer.get_bytes(0, 1)[0]
+        # puts "Length is #{len.to_s(16)}" unless len.nil?
+
+        @length = [len.to_i, 7].max
+        @remaining = @length
+        @position = 0
+      end
+
+      def read_byte
+        # puts "Reading byte at position #{@position}"
+        while remaining.zero?
+          read_packet
+        end
+
+        byte = buffer.get_bytes(position, 1)[0]
+        # puts "Read byte #{byte.to_s(16)}" unless byte.nil?
+        @position += 1
+        @remaining -= 1
+
+        byte
+      end
+
+      def stuff(unk1, type, data_len)
+        if data_len > 0
+          data = [unk1, type]
+
+          data_len.times do
+            data << read_byte
+          end
+          puts data.inspect
+
+          data
+        end
+      end
+
+      def read_data
+        byte = read_byte
+        while byte != 0xff  do
+          byte = read_byte
+        end
+
+        # search for not 0xff
+        byte = read_byte
+        while byte == 0xff do
+          byte = read_byte
+        end
+
+        unk1 = byte
+        type = read_byte
+
+        data_len = 0
+
+        case(type)
+        when 0x41
+          puts "Rain"
+          stuff(unk1, type, 17)
+        when 0x42
+          puts "Temp"
+          data = stuff(unk1, type, 12)
+          temp = (data[3] + ((data[4] & 0x0f) << 8)) / 10.0;
+          temp = ((data[4] >> 4) == 0x8) ? -temp : temp
+          puts temp
+
+        when 0x44
+          puts "Water"
+          stuff(unk1, type, 7)
+        when 0x46
+          puts "Pressure"
+          stuff(unk1, type, 8)
+        when 0x47
+          puts "UV"
+          stuff(unk1, type, 5)
+        when 0x48
+          puts "Wind"
+          stuff(unk1, type, 11)
+        when 0x60
+          puts "Clock"
+          stuff(unk1, type, 12)
+        else
+          printf("Unknown packet type: %02x, skipping\n", type)
+        end
+
+        #  if verify_checksum(data, data_len) == 0
+        #    wmr_handle_packet(wmr, data, data_len)
+        #  end
+
+        LibHID::Native.send_ready_packet(self)
+
+      end
 
       def self.release(ptr)
         Native.free_object(ptr)
@@ -107,14 +256,6 @@ module LibHID
 
     # # hid_set_usb_debug(0);
     # attach_function :hid_set_usb_debug, [:int], :void
-    
-    RECV_PACKET_LEN   = 8
-    BUF_SIZE = 255
-    PATHLEN = 2
-    PATH_IN  = [ 0xff000001, 0xff000001 ]
-    PATH_OUT = [ 0xff000001, 0xff000002 ]
-    INIT_PACKET1 = [ 0x20, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
-    INIT_PACKET2 = [ 0x01, 0xd0, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
 
 
     attach_function :hid_init, [], :hid_return
@@ -122,6 +263,8 @@ module LibHID
     attach_function :hid_force_open, [:pointer, :int, :pointer, :int], :hid_return
     attach_function :hid_write_identification, [:pointer, :pointer], :hid_return
     attach_function :hid_set_output_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+
+    attach_function :hid_interrupt_read, [:pointer, :uint, :buffer_inout, :uint, :uint], :hid_return
 
     attach_function :hid_close, [:pointer], :hid_return
     attach_function :hid_delete_HIDInterface, [:pointer], :void
