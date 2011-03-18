@@ -20,24 +20,35 @@ module LibHID
         :usb_dev_handle, :pointer,
         :usb_device, :pointer,
         :interface, :int,
-        :id, :char,
+        :id, [:char, 32],
         :hid_data, :pointer,
         :hid_parser, :pointer
       )
+
+      def self.release(ptr)
+        Native.free_object(ptr)
+      end
     end
 
     # typedef struct HIDInterfaceMatcher_t {
     #   unsigned short vendor_id;
     #   unsigned short product_id;
-    #   matcher_fn_t matcher_fn;	//!< Only supported in C library (not via SWIG)
-    #   void* custom_data;		   //!< Only used by matcher_fn
-    #   unsigned int custom_data_length; //!< Only used by matcher_fn
+    #   matcher_fn_t matcher_fn;	# Only supported in C library (not via SWIG)
+    #   void* custom_data;		   # Only used by matcher_fn
+    #   unsigned int custom_data_length; # Only used by matcher_fn
     # } HIDInterfaceMatcher;
     class HIDInterfaceMatcher < FFI::Struct
       layout(
         :vendor_id, :short,
-        :product_id, :short
+        :product_id, :short,
+        :foo, :pointer,
+        :bar, :pointer,
+        :baz, :int
       )
+
+      def self.release(ptr)
+        Native.free_object(ptr)
+      end
     end
 
     #  char const* const serial = "01518";
@@ -75,6 +86,28 @@ module LibHID
       :hid_ret_not_foun
     ]
 
+    # Incomplete debug helpers
+    # enum :hid_debug_level, [
+    #   HID_DEBUG_NONE, 0x0,		# Default
+    #   HID_DEBUG_ERRORS, 0x1,	# Serious conditions
+    #   HID_DEBUG_WARNINGS, 0x2,	# Less serious conditions
+    #   HID_DEBUG_NOTICES, 0x4,	# Informational messages
+    #   HID_DEBUG_TRACES, 0x8,	# Verbose tracing of functions
+    #   HID_DEBUG_ASSERTS, 0x10,	# Assertions for sanity checking
+    #   hid_debug_notraces, hid_debug_errors | hid_debug_warnings | hid_debug_notices | hid_debug_asserts,
+    #   # This is what you probably want to start with while developing with libhid
+    #   HID_DEBUG_ALL = HID_DEBUG_ERRORS | HID_DEBUG_WARNINGS | HID_DEBUG_NOTICES | HID_DEBUG_TRACES | HID_DEBUG_ASSERTS
+    # ]
+
+    # hid_set_debug(HID_DEBUG_ALL);
+    # attach_function :hid_set_debug, [], :void
+
+    # # hid_set_debug_stream(stderr);
+    # attach_function :hid_set_debug_stream, [:pointer], :void
+
+    # # hid_set_usb_debug(0);
+    # attach_function :hid_set_usb_debug, [:int], :void
+    
     attach_function :hid_init, [], :hid_return
     attach_function :hid_new_HIDInterface, [], :pointer
     attach_function :hid_force_open, [:pointer, :int, :pointer, :int], :hid_return
