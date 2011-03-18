@@ -84,10 +84,10 @@ module LibHID
         data_array = (0..Native::RECV_PACKET_LEN).map {|x| data[x] if data[x]}
         # puts (0..Native::RECV_PACKET_LEN).map {|x| data[x].to_s(16).rjust(2, '0') if data[x]}.join(' ')
 
-        len = buffer.get_bytes(0, 1)[0]
+        len = buffer.get_bytes(0, 1)[0].to_i
         # puts "Length is #{len.to_s(16)}" unless len.nil?
 
-        @length = [len.to_i, 7].max
+        @length = [len, 7].max
         @remaining = @length
         @position = 0
       end
@@ -98,7 +98,7 @@ module LibHID
           read_packet
         end
 
-        byte = buffer.get_bytes(position, 1)[0]
+        byte = buffer.get_bytes(position, 1)[0].to_i
         # puts "Read byte #{byte.to_s(16)}" unless byte.nil?
         @position += 1
         @remaining -= 1
@@ -106,14 +106,13 @@ module LibHID
         byte
       end
 
-      def stuff(unk1, type, data_len)
+      def fetch_data(unk1, type, data_len)
         if data_len > 0
           data = [unk1, type]
 
           data_len.times do
             data << read_byte
           end
-          puts data.inspect
 
           data
         end
@@ -138,30 +137,31 @@ module LibHID
 
         case(type)
         when 0x41
-          puts "Rain"
-          stuff(unk1, type, 17)
+          puts "Rain #{data.inspect}"
+          fetch_data(unk1, type, 17)
         when 0x42
-          puts "Temp"
-          data = stuff(unk1, type, 12)
+          data = fetch_data(unk1, type, 12)
+          puts "Temp #{data.inspect}"
+
           temp = (data[3] + ((data[4] & 0x0f) << 8)) / 10.0;
           temp = ((data[4] >> 4) == 0x8) ? -temp : temp
           puts temp
 
         when 0x44
-          puts "Water"
-          stuff(unk1, type, 7)
+          data = fetch_data(unk1, type, 7)
+          puts "Water #{data.inspect}"
         when 0x46
-          puts "Pressure"
-          stuff(unk1, type, 8)
+          data = fetch_data(unk1, type, 8)
+          puts "Pressure #{data.inspect}"
         when 0x47
-          puts "UV"
-          stuff(unk1, type, 5)
+          data = fetch_data(unk1, type, 5)
+          puts "UV #{data.inspect}"
         when 0x48
-          puts "Wind"
-          stuff(unk1, type, 11)
+          data = fetch_data(unk1, type, 11)
+          puts "Wind #{data.inspect}"
         when 0x60
-          puts "Clock"
-          stuff(unk1, type, 12)
+          data = fetch_data(unk1, type, 12)
+          puts "Clock #{data.inspect}"
         else
           printf("Unknown packet type: %02x, skipping\n", type)
         end
