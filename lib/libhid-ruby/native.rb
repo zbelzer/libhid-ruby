@@ -17,8 +17,8 @@ module LibHID
     RECV_PACKET_LEN   = 8
     BUF_SIZE = 255
     PATHLEN = 2
-    PATH_IN  = [ 0xff00, 0x0001, 0xff00, 0x0001 ]
-    PATH_OUT = [ 0xff00, 0x0001, 0xff00, 0x0002 ]
+    PATH_IN  = [ 0xff000001, 0xff000001 ]
+    PATH_OUT = [ 0xff000001, 0xff000002 ]
     INIT_PACKET1 = [ 0x20, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
     INIT_PACKET2 = [ 0x01, 0xd0, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
     USB_ENDPOINT_IN	= 0x80
@@ -27,8 +27,8 @@ module LibHID
     RETRIES = 10
 
     def self.send_init_packet(interface)
-      path_in = FFI::Buffer.new :ushort, 4
-      path_in.write_array_of_ushort PATH_IN
+      path_in = FFI::Buffer.new :int, 2
+      write_bignum32_array path_in, PATH_IN
 
       init_packet = FFI::MemoryPointer.new(INIT_PACKET1.size * 1).write_array_of_char(INIT_PACKET1)
       result = Native.hid_set_output_report(interface.to_ptr, path_in, 2, init_packet, init_packet.size)
@@ -36,8 +36,8 @@ module LibHID
     end
 
     def self.send_ready_packet(interface)
-      path_in = FFI::Buffer.new :ushort, 4
-      path_in.write_array_of_ushort PATH_IN
+      path_in = FFI::Buffer.new :int, 2
+      write_bignum32_array path_in, PATH_IN
 
       ready_packet = FFI::MemoryPointer.new(INIT_PACKET2.size * 1).write_array_of_char(INIT_PACKET2)
       result = Native.hid_set_output_report(interface.to_ptr, path_in, 2, ready_packet, ready_packet.size)
@@ -281,14 +281,13 @@ module LibHID
     attach_function :hid_delete_HIDInterface, [:pointer], :void
     attach_function :hid_cleanup, [], :hid_return
 
-    #TOOD: Are these actually useful?
-    #This will take something like 0xff000001 (which is a bignum in ruby),
-    #and write it out to an integer pointer correctly
+    #This will take something like 0xff000001 (which is a Bignum in Ruby),
+    #and write it out to an integer pointer correctly, which doesn't normally
+    #work due to the lack of unsigned values in Ruby
     def self.write_bignum32(pointer, uint)
       pointer.write_array_of_ushort bignum32_to_little_endian_short_array(uint)
     end
 
-    #TODO: This isn't quite working, are there extra bits on bottom in the converter?
     def self.write_bignum32_array(pointer, uints)
       array = uints.map { |uint| bignum32_to_little_endian_short_array(uint) }.flatten
       pointer.write_array_of_ushort array
