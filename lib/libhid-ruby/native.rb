@@ -2,242 +2,30 @@ require 'rubygems'
 require 'ffi'
 
 module LibHID
-  def self.check_result(operation, result)
-    if result == :hid_ret_success
-      puts "#{operation}... success"
-    else
-      raise "#{operation} failed with #{result}"
-    end
-  end
-
   module Native
     extend FFI::Library
     ffi_lib "libhid"
 
-    RECV_PACKET_LEN   = 8
-    BUF_SIZE = 255
-    PATHLEN = 2
-    PATH_IN  = [ 0xff000001, 0xff000001 ]
-    PATH_OUT = [ 0xff000001, 0xff000002 ]
-    INIT_PACKET1 = [ 0x20, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
-    INIT_PACKET2 = [ 0x01, 0xd0, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 ]
-    USB_ENDPOINT_IN	= 0x80
-    USB_ENDPOINT_OUT = 0x00
+    HID_DEBUG_NONE      = 0x0		# Default
+    HID_DEBUG_ERRORS    = 0x1   # Serious conditions
+    HID_DEBUG_WARNINGS  = 0x2   # Less serious conditions
+    HID_DEBUG_NOTICES   = 0x4   # Informational messages
+    HID_DEBUG_TRACES    = 0x8   # Verbose tracing of functions
+    HID_DEBUG_ASSERTS   = 0x10	# Assertions for sanity checking
+    # hid_debug_notraces, hid_debug_errors | hid_debug_warnings | hid_debug_notices | hid_debug_asserts,
+    # This is what you probably want to start with while developing with libhid
+    HID_DEBUG_ALL = HID_DEBUG_ERRORS | HID_DEBUG_WARNINGS | HID_DEBUG_NOTICES | HID_DEBUG_TRACES | HID_DEBUG_ASSERTS
 
-    RETRIES = 10
-
-    def self.send_init_packet(interface)
-      path_in = FFI::Buffer.new :int, 2
-      write_bignum32_array path_in, PATH_IN
-
-      init_packet = FFI::MemoryPointer.new(INIT_PACKET1.size * 1).write_array_of_char(INIT_PACKET1)
-      result = Native.hid_set_output_report(interface.to_ptr, path_in, 2, init_packet, init_packet.size)
-      # LibHID.check_result "Sending init packet", result
-    end
-
-    def self.send_ready_packet(interface)
-      path_in = FFI::Buffer.new :int, 2
-      write_bignum32_array path_in, PATH_IN
-
-      ready_packet = FFI::MemoryPointer.new(INIT_PACKET2.size * 1).write_array_of_char(INIT_PACKET2)
-      result = Native.hid_set_output_report(interface.to_ptr, path_in, 2, ready_packet, ready_packet.size)
-      # LibHID.check_result "Sending init packet", result
-    end
-
-    # typedef struct HIDInterface_t {
-    #   struct usb_dev_handle *dev_handle;
-    #   struct usb_device *device;
-    #   int interface;
-    #   char id[32];
-    #   HIDData* hid_data;
-    #   HIDParser* hid_parser;
-    # } HIDInterface;
-    # #  
-    class HIDInterface < FFI::Struct
-      include Colorize
-
-      def initialize(foo)
-        @buffer = FFI::Buffer.new :char, BUF_SIZE
-        @remaining = 0
-        @position = 1
-
-        super
-      end
-
-      layout(
-        :usb_dev_handle, :pointer,
-        :usb_device, :pointer,
-        :interface, :int,
-        :id, [:char, 32],
-        :hid_data, :pointer,
-        :hid_parser, :pointer
-      )
-
-      def inspect_packet(offset, length)
-        data = @buffer.get_bytes(offset, length)
-        data_array = (0..Native::RECV_PACKET_LEN).map {|x| data[x]}
-
-        pretty = data_array.map do |byte|
-          if byte.nil?
-            red("nil")
-          else
-            text = byte.to_s(16).rjust(2, '0')
-
-            case text
-            when "ff"
-              yellow(text)
-            when "01"
-              blue(text)
-            when "42"
-              green(text)
-            else
-              text
-            end
-          end
-        end
-
-        puts pretty.compact.join(' ')
-      end
-
-      def read_packet
-        # puts "Reading packet"
-        Native.hid_interrupt_read(self.to_ptr, USB_ENDPOINT_IN + 1, @buffer, RECV_PACKET_LEN, 0)
-        inspect_packet(0, RECV_PACKET_LEN)
-
-        len = @buffer.get_bytes(0, 1)[0].to_i
-        # puts "Length is #{len.to_s(16)}" unless len.nil?
-
-        length = [len, 7].min
-        @position = 1
-        @remaining = length
-      end
-
-      def read_byte
-        read_packet while @remaining.zero? 
-        # puts "Reading byte at position #{@position}"
-
-        byte = @buffer.get_bytes(@position, 1)[0].to_i
-        @position += 1
-        @remaining -= 1
-
-        # puts "Read byte #{byte.to_s(16)}, position #{@position}, remaining #{@remaining}" unless byte.nil?
-
-        byte
-      end
-
-      def fetch_data(unk1, type, data_len)
-        if data_len > 0
-          data = [unk1, type]
-
-          (data_len -2).times do
-            data << read_byte
-          end
-
-          data
-        end
-      end
-
-      def read_data
-        byte = read_byte
-        while byte != 0xff do
-          byte = read_byte
-        end
-
-        # search for not 0xff
-        byte = read_byte
-        while byte == 0xff do
-          byte = read_byte
-        end
-
-        unk1 = byte
-        type = read_byte
-
-        data_len = 0
-
-        case(type)
-        when 0x41
-          data = fetch_data(unk1, type, 17)
-          puts "Rain: #{data.inspect}"
-        when 0x42
-          data = fetch_data(unk1, type, 12)
-          puts "Temp: #{print_data(data)}"
-
-          temp = (data[3] + ((data[4] & 0x0f) << 8)) / 10.0;
-          temp = ((data[4] >> 4) == 0x8) ? -temp : temp
-          puts temp
-
-        when 0x44
-          data = fetch_data(unk1, type, 7)
-          puts "Water: #{data.inspect}"
-        when 0x46
-          data = fetch_data(unk1, type, 8)
-          puts "Pressure: #{data.inspect}"
-        when 0x47
-          data = fetch_data(unk1, type, 5)
-          puts "UV: #{data.inspect}"
-        when 0x48
-          data = fetch_data(unk1, type, 11)
-          puts "Wind: #{data.inspect}"
-        when 0x60
-          data = fetch_data(unk1, type, 12)
-          puts "Clock: #{print_data(data)}"
-
-          mi = data[4];
-          hr = data[5];
-          dy = data[6];
-          mo = data[7];
-          yr = data[8] + 2000;
-
-          printf("%02d/%02d/%04d %02d:%02d\n", mo, dy, yr, hr, mi)
-        else
-          printf("Unknown packet type: %02x, skipping\n", type)
-        end
-
-        #  if verify_checksum(data, data_len) == 0
-        #    wmr_handle_packet(wmr, data, data_len)
-        #  end
-
-        LibHID::Native.send_ready_packet(self)
-      end
-
-      def print_data(data)
-        data.map {|d| d.to_s(16).rjust(2, '0') if d}.join(' ')
-      end
-
-      def self.release(ptr)
-        Native.free_object(ptr)
-      end
-    end
-
-    # typedef struct HIDInterfaceMatcher_t {
-    #   unsigned short vendor_id;
-    #   unsigned short product_id;
-    #   matcher_fn_t matcher_fn;	# Only supported in C library (not via SWIG)
-    #   void* custom_data;		   # Only used by matcher_fn
-    #   unsigned int custom_data_length; # Only used by matcher_fn
-    # } HIDInterfaceMatcher;
-    class HIDInterfaceMatcher < FFI::Struct
-      layout(
-        :vendor_id, :short,
-        :product_id, :short,
-        :foo, :pointer,
-        :bar, :pointer,
-        :baz, :int
-      )
-
-      def self.release(ptr)
-        Native.free_object(ptr)
-      end
-    end
-
-    #  char const* const serial = "01518";
-    #  HIDInterfaceMatcher matcher = {
-    #    0x06c2,                      // vendor ID
-    #    0x0038,                      // product ID
-    #    match_serial_number,         // custom matcher function pointer
-    #    (void*)serial,               // custom matching data
-    #    strlen(serial)+1             // length of custom data
-    #  };
+    # Incomplete debug helpers
+    enum :hid_debug_level, [
+      :hid_debug_none, HID_DEBUG_NONE,
+      :hid_debug_errors, HID_DEBUG_ERRORS,
+      :hid_debug_warnings, HID_DEBUG_WARNINGS,
+      :hid_debug_notices,  HID_DEBUG_NOTICES,
+      :hid_debug_traces, HID_DEBUG_TRACES,
+      :hid_debug_asserts, HID_DEBUG_ASSERTS,
+      :hid_debug_all, HID_DEBUG_ALL
+    ]
 
     enum :hid_return, [
       :hid_ret_success,
@@ -265,40 +53,72 @@ module LibHID
       :hid_ret_not_foun
     ]
 
-    # Incomplete debug helpers
-    # enum :hid_debug_level, [
-    #   HID_DEBUG_NONE, 0x0,		# Default
-    #   HID_DEBUG_ERRORS, 0x1,	# Serious conditions
-    #   HID_DEBUG_WARNINGS, 0x2,	# Less serious conditions
-    #   HID_DEBUG_NOTICES, 0x4,	# Informational messages
-    #   HID_DEBUG_TRACES, 0x8,	# Verbose tracing of functions
-    #   HID_DEBUG_ASSERTS, 0x10,	# Assertions for sanity checking
-    #   hid_debug_notraces, hid_debug_errors | hid_debug_warnings | hid_debug_notices | hid_debug_asserts,
-    #   # This is what you probably want to start with while developing with libhid
-    #   HID_DEBUG_ALL = HID_DEBUG_ERRORS | HID_DEBUG_WARNINGS | HID_DEBUG_NOTICES | HID_DEBUG_TRACES | HID_DEBUG_ASSERTS
-    # ]
+    class HIDInterface < FFI::Struct
+      layout(
+        :usb_dev_handle, :pointer,
+        :usb_device, :pointer,
+        :interface, :int,
+        :id, [:char, 32],
+        :hid_data, :pointer,
+        :hid_parser, :pointer
+      )
 
-    # hid_set_debug(HID_DEBUG_ALL);
-    # attach_function :hid_set_debug, [], :void
+      def self.release(ptr)
+        Native.free_object(ptr)
+      end
+    end
 
-    # # hid_set_debug_stream(stderr);
-    # attach_function :hid_set_debug_stream, [:pointer], :void
+    class HIDInterfaceMatcher < FFI::Struct
+      layout(
+        :vendor_id, :short,
+        :product_id, :short,
+        :foo, :pointer,
+        :bar, :pointer,
+        :baz, :int
+      )
 
-    # # hid_set_usb_debug(0);
-    # attach_function :hid_set_usb_debug, [:int], :void
+      def self.release(ptr)
+        Native.free_object(ptr)
+      end
+    end
 
+    attach_function :hid_set_debug, [:hid_debug_level], :void
+
+    attach_function :hid_set_debug_stream, [:pointer], :void
+    attach_function :hid_set_usb_debug, [:int], :void
+
+    attach_function :hid_new_HIDInterface, [], :pointer
+
+    attach_function :hid_delete_HIDInterface, [:pointer], :void
+    attach_function :hid_reset_HIDInterface, [:pointer], :void
+    
 
     attach_function :hid_init, [], :hid_return
-    attach_function :hid_new_HIDInterface, [], :pointer
-    attach_function :hid_force_open, [:pointer, :int, :pointer, :int], :hid_return
-    attach_function :hid_write_identification, [:pointer, :pointer], :hid_return
-    attach_function :hid_set_output_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+    attach_function :hid_cleanup, [], :hid_return
 
-    attach_function :hid_interrupt_read, [:pointer, :uint, :buffer_inout, :uint, :uint], :hid_return
+    attach_function :hid_is_initialised, [], :bool
+
+    attach_function :hid_open, [:pointer, :int, :pointer], :hid_return
+    attach_function :hid_force_open, [:pointer, :int, :pointer, :int], :hid_return
 
     attach_function :hid_close, [:pointer], :hid_return
-    attach_function :hid_delete_HIDInterface, [:pointer], :void
-    attach_function :hid_cleanup, [], :hid_return
+
+    attach_function :hid_is_opened, [:pointer], :bool
+
+    attach_function :hid_get_input_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+    attach_function :hid_set_output_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+
+    attach_function :hid_get_feature_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+    attach_function :hid_set_feature_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+
+    attach_function :hid_write_identification, [:pointer, :pointer], :hid_return
+
+    attach_function :hid_dump_tree, [:pointer, :pointer], :hid_return
+
+    attach_function :hid_interrupt_read, [:pointer, :uint, :buffer_inout, :uint, :uint], :hid_return
+    attach_function :hid_interrupt_write, [:pointer, :uint, :buffer_inout, :uint, :uint], :hid_return
+
+    attach_function :hid_set_idle, [:pointer, :uint, :uint],  :hid_return
 
     #This will take something like 0xff000001 (which is a Bignum in Ruby),
     #and write it out to an integer pointer correctly, which doesn't normally
