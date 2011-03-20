@@ -54,18 +54,14 @@ module LibHID
     # } HIDInterface;
     # #  
     class HIDInterface < FFI::Struct
-      attr_writer :buffer, :remaining, :position
+      include Colorize
 
-      def buffer
-        @buffer ||= FFI::Buffer.new :char, BUF_SIZE
-      end
+      def initialize(foo)
+        @buffer = FFI::Buffer.new :char, BUF_SIZE
+        @remaining = 0
+        @position = 1
 
-      def remaining
-        @remaining ||= 0
-      end
-
-      def position
-        @position ||= 0
+        super
       end
 
       layout(
@@ -77,31 +73,54 @@ module LibHID
         :hid_parser, :pointer
       )
 
+      def inspect_packet(offset, length)
+        data = @buffer.get_bytes(offset, length)
+        data_array = (0..Native::RECV_PACKET_LEN).map {|x| data[x]}
+
+        pretty = data_array.map do |byte|
+          if byte.nil?
+            red("nil")
+          else
+            text = byte.to_s(16).rjust(2, '0')
+
+            case text
+            when "ff"
+              yellow(text)
+            when "01"
+              blue(text)
+            when "42"
+              green(text)
+            else
+              text
+            end
+          end
+        end
+
+        puts pretty.compact.join(' ')
+      end
+
       def read_packet
         # puts "Reading packet"
-        Native.hid_interrupt_read(self.to_ptr, USB_ENDPOINT_IN + 1, buffer, RECV_PACKET_LEN, 0)
+        Native.hid_interrupt_read(self.to_ptr, USB_ENDPOINT_IN + 1, @buffer, RECV_PACKET_LEN, 0)
+        inspect_packet(0, RECV_PACKET_LEN)
 
-        data = buffer.get_bytes(0, RECV_PACKET_LEN)
-        data_array = (0..Native::RECV_PACKET_LEN).map {|x| data[x] if data[x]}
-        puts (0..Native::RECV_PACKET_LEN).map {|x| data[x].to_s(16).rjust(2, '0') if data[x]}.join(' ')
-
-        len = buffer.get_bytes(0, 1)[0].to_i
+        len = @buffer.get_bytes(0, 1)[0].to_i
         # puts "Length is #{len.to_s(16)}" unless len.nil?
 
-        length = [len, 7].max
+        length = [len, 7].min
         @position = 1
         @remaining = length
       end
 
       def read_byte
+        read_packet while @remaining.zero? 
         # puts "Reading byte at position #{@position}"
-        read_packet while remaining.zero? 
 
-        byte = buffer.get_bytes(position, 1)[0].to_i
+        byte = @buffer.get_bytes(@position, 1)[0].to_i
         @position += 1
         @remaining -= 1
 
-        # puts "Read byte #{byte.to_s(16)}, position #{position}, remaining #{remaining}" unless byte.nil?
+        # puts "Read byte #{byte.to_s(16)}, position #{@position}, remaining #{@remaining}" unless byte.nil?
 
         byte
       end
@@ -110,7 +129,7 @@ module LibHID
         if data_len > 0
           data = [unk1, type]
 
-          data_len.times do
+          (data_len -2).times do
             data << read_byte
           end
 
