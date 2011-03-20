@@ -71,10 +71,7 @@ module WMR
       puts "Found on USB: #{@native_interface[:id]}"
     end
 
-    def inspect_packet(offset, length)
-      data = @buffer.get_bytes(offset, length)
-      data_array = (0...RECV_PACKET_LEN).map {|x| data[x]}
-
+    def inspect_data(data_array)
       pretty = data_array.map do |byte|
         if byte.nil?
           red("nil")
@@ -100,7 +97,8 @@ module WMR
     def read_packet
       # puts "Reading packet"
       LibHID::Native.hid_interrupt_read(@native_interface.to_ptr, USB_ENDPOINT_IN + 1, @buffer, RECV_PACKET_LEN, 0)
-      inspect_packet(0, RECV_PACKET_LEN)
+      # data = @buffer.get_bytes(0, RECV_PACKET_LEN)
+      # inspect_data(data)
 
       len = @buffer.get_bytes(0, 1)[0].to_i
       # puts "Length is #{len.to_s(16)}" unless len.nil?
@@ -123,81 +121,63 @@ module WMR
       byte
     end
 
-    def fetch_data(unk1, type, data_len)
-      if data_len > 0
-        data = [unk1, type]
+    def read_bytes(length)
+      1.upto(length).map {read_byte}
+    end
 
-        (data_len -2).times do
-          data << read_byte
-        end
+    def verify_checksum!(data)
+      length = data.size
 
-        data
+      calc = (0...(length-2)).inject(0) { |sum, i| sum += data[i] }
+      checksum = data[length-2] + (data[length-1] << 8)
+
+      if calc != checksum
+        raise "Bad checksum: #{checksum} / calc: #{calc}"
       end
     end
 
     def read_data
-      byte = read_byte
-      while byte != 0xff do
-        byte = read_byte
-      end
+      # search for 0xff
+      byte = read_byte while byte != 0xff 
 
       # search for not 0xff
-      byte = read_byte
-      while byte == 0xff do
-        byte = read_byte
-      end
+      byte = read_byte while byte == 0xff 
 
       unk1 = byte
       type = read_byte
 
-      data_len = 0
+      if type_name = TYPES[type]
+        raw_data = [unk1, type].push(*read_bytes(SIZES[type]))
+        inspect_data(raw_data)
 
-      case(type)
-      when 0x41
-        data = fetch_data(unk1, type, 17)
-        puts "Rain: #{data.inspect}"
-      when 0x42
-        data = fetch_data(unk1, type, 12)
-        temp = (data[3] + ((data[4] & 0x0f) << 8)) / 10.0;
-        temp = ((data[4] >> 4) == 0x8) ? -temp : temp
+        verify_checksum!(raw_data)
 
-        puts "Temp: #{temp}"
-      when 0x44
-        data = fetch_data(unk1, type, 7)
-        puts "Water: #{data.inspect}"
-      when 0x46
-        data = fetch_data(unk1, type, 8)
-        puts "Pressure: #{data.inspect}"
-      when 0x47
-        data = fetch_data(unk1, type, 5)
-        puts "UV: #{data.inspect}"
-      when 0x48
-        data = fetch_data(unk1, type, 11)
-        puts "Wind: #{data.inspect}"
-      when 0x60
-        data = fetch_data(unk1, type, 12)
-        puts "Clock: #{print_data(data)}"
-
-        mi = data[4];
-        hr = data[5];
-        dy = data[6];
-        mo = data[7];
-        yr = data[8] + 2000;
-
-        printf("%02d/%02d/%04d %02d:%02d\n", mo, dy, yr, hr, mi)
+        data = send("handle_#{type_name}", raw_data)
+        puts data.inspect
       else
         printf("Unknown packet type: %02x, skipping\n", type)
       end
 
-      #  if verify_checksum(data, data_len) == 0
-      #    wmr_handle_packet(wmr, data, data_len)
-      #  end
-
       WMR.send_ready_packet(@native_interface)
     end
 
-    def print_data(data)
-      data.map {|d| d.to_s(16).rjust(2, '0') if d}.join(' ')
+
+    def handle_temp(data)
+      temp = (data[3] + ((data[4] & 0x0f) << 8)) / 10.0;
+      temp = ((data[4] >> 4) == 0x8) ? -temp : temp
+
+      {:celcius => temp}
+    end
+
+    def handle_clock(data)
+      minute = data[4];
+      hour = data[5];
+      day = data[6];
+      month = data[7];
+      year = data[8] + 2000;
+
+
+      Time.mktime(year, month, day, hour, minute)
     end
 
     def cleanup
