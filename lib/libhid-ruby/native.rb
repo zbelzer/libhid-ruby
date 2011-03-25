@@ -104,11 +104,11 @@ module LibHID
 
     attach_function :hid_is_opened, [:pointer], :bool
 
-    attach_function :hid_get_input_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
-    attach_function :hid_set_output_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+    attach_function :hid_get_input_report, [:pointer, :pointer, :int, :string, :int], :hid_return
+    attach_function :hid_set_output_report, [:pointer, :pointer, :int, :string, :int], :hid_return
 
-    attach_function :hid_get_feature_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
-    attach_function :hid_set_feature_report, [:pointer, :pointer, :int, :pointer, :int], :hid_return
+    attach_function :hid_get_feature_report, [:pointer, :pointer, :int, :string, :int], :hid_return
+    attach_function :hid_set_feature_report, [:pointer, :pointer, :int, :string, :int], :hid_return
 
     attach_function :hid_write_identification, [:pointer, :pointer], :hid_return
 
